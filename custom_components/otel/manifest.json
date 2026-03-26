@@ -1,0 +1,21 @@
+{
+  "domain": "otel",
+  "name": "OpenTelemetry Exporter",
+  "codeowners": [
+    "@Grandys"
+  ],
+  "version": "0.1.0",
+  "config_flow": true,
+  "documentation": "https://github.com/Grandys/otel-exporter#readme",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Grandys/otel-exporter/issues",
+  "loggers": ["opentelemetry"],
+  "requirements": [
+    "opentelemetry-api==1.40.0",
+    "opentelemetry-sdk==1.40.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.40.0",
+    "opentelemetry-exporter-otlp-proto-http==1.40.0"
+  ],
+  "single_config_entry": true
+}
