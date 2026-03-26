@@ -1,5 +1,5 @@
 {
-    "name": "Integration blueprint",
-    "homeassistant": "2026.3.2",
-    "hacs": "2.0.5"
+  "name": "Home Assistant OpenTelemetry Exporter",
+  "homeassistant": "2026.3.2",
+  "hacs": "2.0.5"
 }
