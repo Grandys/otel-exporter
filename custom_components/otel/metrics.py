@@ -6,11 +6,7 @@ import logging
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-# Import SensorStateClass; fall back to string comparison if unavailable
-try:
-    from homeassistant.components.sensor import SensorStateClass
-except ImportError:
-    SensorStateClass = None  # type: ignore[assignment,misc]
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_FRIENDLY_NAME,
@@ -35,6 +31,8 @@ from homeassistant.helpers.state import state_as_number
 from .const import PROTOCOL_GRPC
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.helpers.event import EventStateChangedData
     from opentelemetry.metrics import Counter, Gauge, Meter, MeterProvider
@@ -91,7 +89,7 @@ class OtelMetricsManager:
         self._area_registry: ar.AreaRegistry | None = None
 
         # Domain handler dispatch table
-        self._domain_handlers: dict[str, Any] = {
+        self._domain_handlers: dict[str, Callable[[State, dict[str, str]], None]] = {
             "binary_sensor": self._handle_binary_sensor,
             "climate": self._handle_climate,
             "cover": self._handle_cover,
@@ -110,7 +108,6 @@ class OtelMetricsManager:
 
     def setup(self) -> None:
         """Set up the OTel MeterProvider and exporter in the executor."""
-        from opentelemetry.metrics import set_meter_provider  # noqa: PLC0415
         from opentelemetry.sdk.metrics import MeterProvider  # noqa: PLC0415
         from opentelemetry.sdk.metrics.export import (  # noqa: PLC0415
             PeriodicExportingMetricReader,
@@ -135,7 +132,6 @@ class OtelMetricsManager:
             resource=resource,
             metric_readers=[reader],
         )
-        set_meter_provider(self._meter_provider)
         self._meter = self._meter_provider.get_meter("homeassistant.otel")
 
     def _create_exporter(self) -> Any:
@@ -343,12 +339,7 @@ class OtelMetricsManager:
         device_class = state.attributes.get(ATTR_DEVICE_CLASS, "generic")
         unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT, "")
 
-        total_increasing = (
-            SensorStateClass.TOTAL_INCREASING
-            if SensorStateClass is not None
-            else "total_increasing"
-        )
-        if state_class == total_increasing:
+        if state_class == SensorStateClass.TOTAL_INCREASING:
             self._record_counter_delta(
                 name=f"ha.sensor.{device_class}.total",
                 entity_id=state.entity_id,
@@ -563,9 +554,14 @@ class OtelMetricsManager:
     def _handle_weather(self, state: State, labels: dict[str, str]) -> None:
         """Handle weather entity metrics."""
         for attr, metric_name, unit, desc in (
-            ("temperature", "ha.weather.temperature", "", "Weather temperature"),
-            ("humidity", "ha.weather.humidity", "%", "Weather humidity"),
-            ("pressure", "ha.weather.pressure", "", "Weather pressure"),
+            (
+                ATTR_WEATHER_TEMPERATURE,
+                "ha.weather.temperature",
+                "",
+                "Weather temperature",
+            ),
+            (ATTR_WEATHER_HUMIDITY, "ha.weather.humidity", "%", "Weather humidity"),
+            (ATTR_WEATHER_PRESSURE, "ha.weather.pressure", "", "Weather pressure"),
         ):
             value = state.attributes.get(attr)
             if value is not None:
