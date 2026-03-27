@@ -1,0 +1,48 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This service is already configured"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error"
+    },
+    "step": {
+      "user": {
+        "title": "Configure OpenTelemetry export",
+        "description": "Set up metric export to an OpenTelemetry Collector.",
+        "data": {
+          "endpoint": "OTLP endpoint URL",
+          "protocol": "Protocol",
+          "auth_header": "Authorization header"
+        },
+        "data_description": {
+          "endpoint": "URL of the OTLP receiver (e.g., http://localhost:4317 for gRPC, http://localhost:4318/v1/metrics for HTTP)",
+          "protocol": "Transport protocol to use for sending metrics",
+          "auth_header": "Optional Bearer token or API key for authentication"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OpenTelemetry export options",
+        "description": "Configure which entity domains to export and how often.",
+        "data": {
+          "domains": "Entity domains to export",
+          "export_interval": "Export interval (seconds)"
+        },
+        "data_description": {
+          "domains": "Select which entity domains should have their states exported as metrics",
+          "export_interval": "How often to push collected metrics to the collector"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Cannot connect to OTLP endpoint {endpoint}"
+    }
+  }
+}

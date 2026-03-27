@@ -7,6 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import (
+    ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlowWithReload,
@@ -72,7 +73,7 @@ class OtelConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(
-        _config_entry: ConfigFlow,
+        _config_entry: ConfigEntry,
     ) -> OtelOptionsFlowHandler:
         """Get the options flow for this handler."""
         return OtelOptionsFlowHandler()
@@ -154,30 +155,32 @@ class OtelOptionsFlowHandler(OptionsFlowWithReload):
 
 
 def _validate_endpoint(endpoint: str, protocol: str, auth_header: str | None) -> None:
-    """Validate the OTLP endpoint connectivity in the executor."""
-    if protocol == PROTOCOL_GRPC:
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415
-            OTLPMetricExporter as OTLPMetricExporterGrpc,
-        )
+    """Validate the OTLP endpoint by attempting to create an exporter."""
+    try:
+        if protocol == PROTOCOL_GRPC:
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415
+                OTLPMetricExporter as OTLPMetricExporterGrpc,
+            )
 
-        headers = (("authorization", auth_header),) if auth_header else None
-        exporter = OTLPMetricExporterGrpc(
-            endpoint=endpoint,
-            headers=headers,
-            insecure=endpoint.startswith("http://"),
-            timeout=5,
-        )
-    else:
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (  # noqa: PLC0415
-            OTLPMetricExporter as OTLPMetricExporterHttp,
-        )
+            headers = (("authorization", auth_header),) if auth_header else None
+            exporter = OTLPMetricExporterGrpc(
+                endpoint=endpoint,
+                headers=headers,
+                insecure=endpoint.startswith("http://"),
+                timeout=5,
+            )
+        else:
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import (  # noqa: PLC0415
+                OTLPMetricExporter as OTLPMetricExporterHttp,
+            )
 
-        headers = {"authorization": auth_header} if auth_header else None
-        exporter = OTLPMetricExporterHttp(
-            endpoint=endpoint,
-            headers=headers,
-            timeout=5,
-        )
-    # Attempt a shutdown to verify the exporter can be created
-    # without actually sending data
-    exporter.shutdown()
+            headers = {"authorization": auth_header} if auth_header else None
+            exporter = OTLPMetricExporterHttp(
+                endpoint=endpoint,
+                headers=headers,
+                timeout=5,
+            )
+        exporter.shutdown()
+    except Exception as err:
+        msg = f"Cannot create OTLP exporter for {endpoint}"
+        raise ConnectionError(msg) from err
