@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+python_bin="${PWD}/.venv/bin/python"
+if [[ ! -x "${python_bin}" ]]; then
+    python_bin="python3"
+fi
+
+"${python_bin}" -m unittest discover -s tests -p 'test_*.py'

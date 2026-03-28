@@ -16,8 +16,9 @@ Pull requests are the best way to propose changes to the codebase.
 1. Fork the repo and create your branch from `main`.
 2. If you've changed something, update the documentation.
 3. Make sure your code lints (using `scripts/lint`).
-4. Test you contribution.
-5. Issue that pull request!
+4. Run the unit tests with `scripts/test`.
+5. Test your contribution in Home Assistant when the change affects runtime behavior.
+6. Issue that pull request!
 
 ## Any contributions you make will be under the MIT Software License
 
@@ -53,8 +54,13 @@ Use the bundled local development setup to validate changes:
 1. Install dependencies with `scripts/setup`.
 2. Start Home Assistant with `scripts/develop`.
 3. Run linting with `scripts/lint`.
+4. Run unit tests with `scripts/test`.
 
 The local Home Assistant instance uses [`config/configuration.yaml`](./config/configuration.yaml).
+
+## Pre-commit
+
+If you use pre-commit locally, this repository includes a `.pre-commit-config.yaml` with Ruff and the unit test suite.
 
 ## License
 

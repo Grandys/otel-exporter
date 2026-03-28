@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry
 
 from .const import (
     CONF_AUTH_HEADER,
@@ -14,12 +17,22 @@ from .const import (
     CONF_EXPORT_INTERVAL,
     CONF_PROTOCOL,
     DEFAULT_EXPORT_INTERVAL,
+    DOMAIN,
+    ISSUE_ID_EXPORT_FAILED,
+    ISSUE_ID_INVALID_AUTH,
     METRIC_DOMAINS,
 )
 from .metrics import OtelMetricsManager
+from .otlp import (
+    OtelAuthenticationError,
+    OtelConnectionError,
+    validate_metric_exporter_connection,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+_LOGGER = logging.getLogger(__name__)
 
 type OtelConfigEntry = ConfigEntry[OtelRuntimeData]
 
@@ -39,6 +52,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: OtelConfigEntry) -> bool
     domains = set(entry.options.get(CONF_DOMAINS, METRIC_DOMAINS))
     export_interval = entry.options.get(CONF_EXPORT_INTERVAL, DEFAULT_EXPORT_INTERVAL)
 
+    try:
+        await hass.async_add_executor_job(
+            validate_metric_exporter_connection,
+            endpoint,
+            protocol,
+            auth_header,
+        )
+    except OtelAuthenticationError as err:
+        issue_registry.async_create_issue(
+            hass,
+            DOMAIN,
+            ISSUE_ID_INVALID_AUTH,
+            is_fixable=True,
+            is_persistent=True,
+            severity=issue_registry.IssueSeverity.ERROR,
+            translation_key="invalid_auth",
+        )
+        msg = "OTLP authentication failed"
+        raise ConfigEntryAuthFailed(msg) from err
+    except OtelConnectionError as err:
+        _LOGGER.warning("Unable to connect to OTLP endpoint %s: %s", endpoint, err)
+        msg = f"Unable to connect to OTLP endpoint {endpoint}"
+        raise ConfigEntryNotReady(msg) from err
+
+    issue_registry.async_delete_issue(hass, DOMAIN, ISSUE_ID_INVALID_AUTH)
+    issue_registry.async_delete_issue(hass, DOMAIN, ISSUE_ID_EXPORT_FAILED)
+
     metrics_manager = OtelMetricsManager(
         hass=hass,
         endpoint=endpoint,
@@ -48,7 +88,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: OtelConfigEntry) -> bool
         export_interval_seconds=int(export_interval),
     )
 
-    await hass.async_add_executor_job(metrics_manager.setup)
+    try:
+        await hass.async_add_executor_job(metrics_manager.setup)
+    except Exception as err:
+        msg = f"Unable to initialize the OTLP exporter for {endpoint}"
+        raise ConfigEntryNotReady(msg) from err
 
     metrics_manager.start_listening(entry)
 
