@@ -28,6 +28,10 @@ Custom Home Assistant integration that exports Home Assistant entity state chang
 
 ## Configuration
 
+Open the config flow directly in your Home Assistant instance:
+
+[![Open your Home Assistant instance and start setting up OpenTelemetry Exporter.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=otel)
+
 1. In Home Assistant, go to `Settings -> Devices & services -> Add integration`.
 2. Search for `OpenTelemetry Exporter`.
 3. Enter:
