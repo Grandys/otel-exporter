@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
+from functools import partial
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import SensorStateClass
@@ -26,9 +28,11 @@ from homeassistant.helpers import (
 from homeassistant.helpers import (
     entity_registry as er,
 )
+from homeassistant.helpers import issue_registry
 from homeassistant.helpers.state import state_as_number
 
-from .const import PROTOCOL_GRPC
+from .const import DOMAIN, EXPORT_FAILURE_THRESHOLD, ISSUE_ID_EXPORT_FAILED
+from .otlp import TrackingMetricExporter, create_metric_exporter, redact_endpoint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,6 +87,13 @@ class OtelMetricsManager:
         # Previous values for counter delta computation
         self._previous_counter_values: dict[str, float] = {}
 
+        # Export health state
+        self._export_state_lock = Lock()
+        self._consecutive_export_failures = 0
+        self._total_export_failures = 0
+        self._last_export_result: str | None = None
+        self._export_failure_issue_active = False
+
         # HA registries
         self._entity_registry: er.EntityRegistry | None = None
         self._device_registry: dr.DeviceRegistry | None = None
@@ -121,10 +132,19 @@ class OtelMetricsManager:
             }
         )
 
-        exporter = self._create_exporter()
+        exporter = create_metric_exporter(
+            endpoint=self._endpoint,
+            protocol=self._protocol,
+            auth_header=self._auth_header,
+        )
+        tracking_exporter = TrackingMetricExporter(
+            exporter=exporter,
+            on_success=self._handle_export_success,
+            on_failure=self._handle_export_failure,
+        )
 
         reader = PeriodicExportingMetricReader(
-            exporter,
+            tracking_exporter,
             export_interval_millis=self._export_interval * 1000,
         )
 
@@ -133,32 +153,6 @@ class OtelMetricsManager:
             metric_readers=[reader],
         )
         self._meter = self._meter_provider.get_meter("homeassistant.otel")
-
-    def _create_exporter(self) -> Any:
-        """Create the OTLP metric exporter based on configured protocol."""
-        if self._protocol == PROTOCOL_GRPC:
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415
-                OTLPMetricExporter,
-            )
-
-            headers = (
-                (("authorization", self._auth_header),) if self._auth_header else None
-            )
-            return OTLPMetricExporter(
-                endpoint=self._endpoint,
-                headers=headers,
-                insecure=self._endpoint.startswith("http://"),
-            )
-
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (  # noqa: PLC0415
-            OTLPMetricExporter,
-        )
-
-        headers = {"authorization": self._auth_header} if self._auth_header else None
-        return OTLPMetricExporter(
-            endpoint=self._endpoint,
-            headers=headers,
-        )
 
     def start_listening(self, entry: ConfigEntry) -> None:
         """Register event listeners and bootstrap with current states."""
@@ -182,6 +176,81 @@ class OtelMetricsManager:
         if self._meter_provider is not None:
             self._meter_provider.shutdown()
             self._meter_provider = None
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Return a runtime snapshot safe for diagnostics."""
+        with self._export_state_lock:
+            consecutive_failures = self._consecutive_export_failures
+            total_failures = self._total_export_failures
+            last_export_result = self._last_export_result
+            issue_active = self._export_failure_issue_active
+
+        return {
+            "configured_domains": sorted(self._domains),
+            "export_interval_seconds": self._export_interval,
+            "gauge_count": len(self._gauges),
+            "counter_count": len(self._counters),
+            "tracked_counter_state_count": len(self._previous_counter_values),
+            "consecutive_export_failures": consecutive_failures,
+            "total_export_failures": total_failures,
+            "last_export_result": last_export_result,
+            "export_failure_issue_active": issue_active,
+            "meter_initialized": self._meter is not None,
+        }
+
+    def _handle_export_success(self) -> None:
+        """Track successful exports and clear any active repair issue."""
+        should_clear_issue = False
+
+        with self._export_state_lock:
+            self._last_export_result = "success"
+            self._consecutive_export_failures = 0
+            if self._export_failure_issue_active:
+                self._export_failure_issue_active = False
+                should_clear_issue = True
+
+        if should_clear_issue:
+            self._hass.add_job(
+                issue_registry.async_delete_issue,
+                self._hass,
+                DOMAIN,
+                ISSUE_ID_EXPORT_FAILED,
+            )
+
+    def _handle_export_failure(self) -> None:
+        """Track failed exports and create a repair issue when failures persist."""
+        failure_count: int | None = None
+
+        with self._export_state_lock:
+            self._last_export_result = "failure"
+            self._total_export_failures += 1
+            self._consecutive_export_failures += 1
+            if (
+                self._consecutive_export_failures >= EXPORT_FAILURE_THRESHOLD
+                and not self._export_failure_issue_active
+            ):
+                self._export_failure_issue_active = True
+                failure_count = self._consecutive_export_failures
+
+        if failure_count is None:
+            return
+
+        self._hass.add_job(
+            partial(
+                issue_registry.async_create_issue,
+                self._hass,
+                DOMAIN,
+                ISSUE_ID_EXPORT_FAILED,
+                is_fixable=True,
+                is_persistent=True,
+                severity=issue_registry.IssueSeverity.WARNING,
+                translation_key="export_failed",
+                translation_placeholders={
+                    "endpoint": redact_endpoint(self._endpoint),
+                    "failure_count": str(failure_count),
+                },
+            )
+        )
 
     @callback
     def _handle_state_changed_event(self, event: Event[EventStateChangedData]) -> None:
@@ -258,6 +327,11 @@ class OtelMetricsManager:
 
     # --- Instrument helpers ---
 
+    @staticmethod
+    def _sanitize_unit(unit: str) -> str:
+        """Sanitize a unit string for OpenTelemetry."""
+        return unit.encode("ascii", errors="replace").decode("ascii")[:63]
+
     def _require_meter(self) -> Meter:
         """Return the initialized meter or raise if setup has not completed."""
         if self._meter is None:
@@ -268,6 +342,7 @@ class OtelMetricsManager:
     def _get_gauge(self, name: str, unit: str = "", description: str = "") -> Gauge:
         """Get or create a cached Gauge instrument."""
         meter = self._require_meter()
+        unit = self._sanitize_unit(unit)
         key = f"{name}:{unit}"
         if key not in self._gauges:
             self._gauges[key] = meter.create_gauge(
@@ -280,6 +355,7 @@ class OtelMetricsManager:
     def _get_counter(self, name: str, unit: str = "", description: str = "") -> Counter:
         """Get or create a cached Counter instrument."""
         meter = self._require_meter()
+        unit = self._sanitize_unit(unit)
         key = f"{name}:{unit}"
         if key not in self._counters:
             self._counters[key] = meter.create_counter(

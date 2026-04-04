@@ -1,13 +1,44 @@
 {
   "config": {
     "abort": {
-      "already_configured": "This service is already configured"
+      "already_configured": "This service is already configured",
+      "reauth_successful": "Reauthentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
     },
     "error": {
       "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
       "unknown": "Unexpected error"
     },
     "step": {
+      "reauth_confirm": {
+        "title": "Update OpenTelemetry authentication",
+        "description": "Update the OTLP connection settings to restore metric export.",
+        "data": {
+          "endpoint": "OTLP endpoint URL",
+          "protocol": "Protocol",
+          "auth_header": "Authorization header"
+        },
+        "data_description": {
+          "endpoint": "URL of the OTLP receiver (e.g., http://localhost:4317 for gRPC, http://localhost:4318/v1/metrics for HTTP)",
+          "protocol": "Transport protocol to use for sending metrics",
+          "auth_header": "Optional Bearer token or API key for authentication"
+        }
+      },
+      "reconfigure": {
+        "title": "Update OpenTelemetry export settings",
+        "description": "Update the OTLP connection settings used for metric export.",
+        "data": {
+          "endpoint": "OTLP endpoint URL",
+          "protocol": "Protocol",
+          "auth_header": "Authorization header"
+        },
+        "data_description": {
+          "endpoint": "URL of the OTLP receiver (e.g., http://localhost:4317 for gRPC, http://localhost:4318/v1/metrics for HTTP)",
+          "protocol": "Transport protocol to use for sending metrics",
+          "auth_header": "Optional Bearer token or API key for authentication"
+        }
+      },
       "user": {
         "title": "Configure OpenTelemetry export",
         "description": "Set up metric export to an OpenTelemetry Collector.",
@@ -22,6 +53,16 @@
           "auth_header": "Optional Bearer token or API key for authentication"
         }
       }
+    }
+  },
+  "issues": {
+    "export_failed": {
+      "title": "OpenTelemetry metric export is failing",
+      "description": "Metric export to {endpoint} has failed {failure_count} times in a row. Check collector availability, protocol selection, endpoint path, and authentication header. The repair issue will clear automatically after exports succeed again."
+    },
+    "invalid_auth": {
+      "title": "OpenTelemetry authentication failed",
+      "description": "The OTLP endpoint rejected the configured authentication header. Open the integration and update the connection settings to restore metric export."
     }
   },
   "options": {

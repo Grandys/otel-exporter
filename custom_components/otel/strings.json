@@ -1,13 +1,44 @@
 {
   "config": {
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "step": {
+      "reauth_confirm": {
+        "title": "Update OpenTelemetry authentication",
+        "description": "Update the OTLP connection settings to restore metric export.",
+        "data": {
+          "endpoint": "[%key:component::otel::config::step::user::data::endpoint%]",
+          "protocol": "[%key:component::otel::config::step::user::data::protocol%]",
+          "auth_header": "[%key:component::otel::config::step::user::data::auth_header%]"
+        },
+        "data_description": {
+          "endpoint": "[%key:component::otel::config::step::user::data_description::endpoint%]",
+          "protocol": "[%key:component::otel::config::step::user::data_description::protocol%]",
+          "auth_header": "[%key:component::otel::config::step::user::data_description::auth_header%]"
+        }
+      },
+      "reconfigure": {
+        "title": "Update OpenTelemetry export settings",
+        "description": "Update the OTLP connection settings used for metric export.",
+        "data": {
+          "endpoint": "[%key:component::otel::config::step::user::data::endpoint%]",
+          "protocol": "[%key:component::otel::config::step::user::data::protocol%]",
+          "auth_header": "[%key:component::otel::config::step::user::data::auth_header%]"
+        },
+        "data_description": {
+          "endpoint": "[%key:component::otel::config::step::user::data_description::endpoint%]",
+          "protocol": "[%key:component::otel::config::step::user::data_description::protocol%]",
+          "auth_header": "[%key:component::otel::config::step::user::data_description::auth_header%]"
+        }
+      },
       "user": {
         "title": "Configure OpenTelemetry export",
         "description": "Set up metric export to an OpenTelemetry Collector.",
@@ -22,6 +53,16 @@
           "auth_header": "Optional Bearer token or API key for authentication"
         }
       }
+    }
+  },
+  "issues": {
+    "export_failed": {
+      "title": "OpenTelemetry metric export is failing",
+      "description": "Metric export to {endpoint} has failed {failure_count} times in a row. Check collector availability, protocol selection, endpoint path, and authentication header. The repair issue will clear automatically after exports succeed again."
+    },
+    "invalid_auth": {
+      "title": "OpenTelemetry authentication failed",
+      "description": "The OTLP endpoint rejected the configured authentication header. Open the integration and update the connection settings to restore metric export."
     }
   },
   "options": {
