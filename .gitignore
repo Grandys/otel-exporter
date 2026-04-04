@@ -4,3 +4,12 @@ __pycache__/
 *.pyc
 .idea/*
 .data/
+
+# Local Home Assistant dev runtime files
+config/.cache/
+config/.storage/
+config/.HA_VERSION
+config/.ha_run.lock
+config/blueprints/
+config/home-assistant.log*
+config/home-assistant_v2.db*
