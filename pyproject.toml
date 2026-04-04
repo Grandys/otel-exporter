@@ -1,12 +1,18 @@
-# The contents of this file is based on https://github.com/home-assistant/core/blob/dev/pyproject.toml
+[project]
+name = "home-assistant-otel-exporter"
+version = "0.1.0"
+description = "Custom Home Assistant integration that exports entity state changes as OpenTelemetry metrics."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
 
+[tool.ruff]
 target-version = "py314"
 
-[lint]
+[tool.ruff.lint]
 select = [
     "ALL",
 ]
-
 ignore = [
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
     "D203", # no-blank-line-before-class (incompatible with formatter)
@@ -15,16 +21,16 @@ ignore = [
     "ISC001", # incompatible with formatter
 ]
 
-[lint.flake8-pytest-style]
+[tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
 
-[lint.pyupgrade]
+[tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true
 
-[lint.mccabe]
+[tool.ruff.lint.mccabe]
 max-complexity = 25
 
-[lint.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/*.py" = [
     "ANN001",
     "ANN002",
