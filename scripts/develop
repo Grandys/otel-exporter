@@ -10,6 +10,9 @@ if [[ ! -d "${PWD}/config" ]]; then
     hass --config "${PWD}/config" --script ensure_config
 fi
 
+# Start OTel Collector and LGTM stack
+docker compose up -d
+
 # Set the path to custom_components so the local config can load the
 # integration directly from this repository checkout.
 export PYTHONPATH="${PYTHONPATH}:${PWD}/custom_components"

@@ -10,3 +10,49 @@ logger:
   default: info
   logs:
     custom_components.otel: debug
+
+# Demo entities for testing the OTel integration
+input_boolean:
+  otel_demo_enabled:
+    name: OTEL Demo Enabled
+    initial: true
+
+input_number:
+  otel_demo_temperature:
+    name: OTEL Demo Temperature
+    min: 18
+    max: 30
+    step: 0.5
+    unit_of_measurement: "degC"
+    initial: 21.5
+
+template:
+  - sensor:
+      - name: OTEL Demo Power
+        unique_id: otel_demo_power
+        unit_of_measurement: W
+        state: >
+          {{ ((states('input_number.otel_demo_temperature') | float(0)) * 10) | round(1) }}
+
+automation:
+  - alias: OTEL Demo Pulse
+    id: otel_demo_pulse
+    triggers:
+      - trigger: time_pattern
+        seconds: "/15"
+    actions:
+      - action: input_boolean.toggle
+        target:
+          entity_id: input_boolean.otel_demo_enabled
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.otel_demo_temperature
+        data:
+          value: >
+            {% set current = states('input_number.otel_demo_temperature') | float(21.5) %}
+            {% if current >= 24 %}
+              20
+            {% else %}
+              {{ (current + 0.5) | round(1) }}
+            {% endif %}
+    mode: single
