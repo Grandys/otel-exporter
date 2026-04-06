@@ -8,6 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import requests
 from grpc import RpcError, StatusCode
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+    OTLPMetricExporter as OTLPMetricExporterGrpc,
+)
 from opentelemetry.sdk.metrics.export import MetricExportResult
 
 from custom_components.otel.const import PROTOCOL_GRPC, PROTOCOL_HTTP
@@ -15,6 +18,9 @@ from custom_components.otel.otlp import (
     OtelAuthenticationError,
     OtelConnectionError,
     TrackingMetricExporter,
+    _create_grpc_channel,
+    _resolve_grpc_endpoint,
+    create_metric_exporter,
     redact_endpoint,
     validate_metric_exporter_connection,
 )
@@ -91,17 +97,24 @@ class OtlpHelperTests(unittest.TestCase):
             == "https://example.com:4318/v1/metrics"
         )
 
-    @patch("custom_components.otel.otlp.create_metric_exporter")
-    def test_validate_http_authentication_error(
-        self,
-        create_metric_exporter: MagicMock,
-    ) -> None:
-        """HTTP validation should classify 401 responses as auth failures."""
-        exporter = SimpleNamespace(
-            _export=MagicMock(return_value=SimpleNamespace(ok=False, status_code=401)),
-            shutdown=MagicMock(),
+    def test_resolve_grpc_endpoint_accepts_bare_target(self) -> None:
+        """Bare gRPC targets should be treated as insecure host:port values."""
+        assert _resolve_grpc_endpoint("localhost:4317") == ("localhost:4317", True)
+
+    def test_resolve_grpc_endpoint_accepts_https_url(self) -> None:
+        """HTTPS gRPC URLs should preserve the host:port and remain secure."""
+        assert _resolve_grpc_endpoint("https://collector.example.com:4317") == (
+            "collector.example.com:4317",
+            False,
         )
-        create_metric_exporter.return_value = exporter
+
+    @patch("custom_components.otel.otlp.requests.post")
+    def test_validate_http_authentication_error(self, post: MagicMock) -> None:
+        """HTTP validation should classify 401 responses as auth failures."""
+        post.return_value = SimpleNamespace(
+            ok=False,
+            status_code=401,
+        )
 
         try:
             validate_metric_exporter_connection(
@@ -114,19 +127,12 @@ class OtlpHelperTests(unittest.TestCase):
         else:
             self.fail("Expected OtelAuthenticationError")
 
-        exporter.shutdown.assert_called_once_with()
+        post.assert_called_once()
 
-    @patch("custom_components.otel.otlp.create_metric_exporter")
-    def test_validate_http_connection_error(
-        self,
-        create_metric_exporter: MagicMock,
-    ) -> None:
+    @patch("custom_components.otel.otlp.requests.post")
+    def test_validate_http_connection_error(self, post: MagicMock) -> None:
         """HTTP validation should classify request failures as connectivity issues."""
-        exporter = SimpleNamespace(
-            _export=MagicMock(side_effect=requests.exceptions.ConnectionError),
-            shutdown=MagicMock(),
-        )
-        create_metric_exporter.return_value = exporter
+        post.side_effect = requests.exceptions.ConnectionError
 
         try:
             validate_metric_exporter_connection(
@@ -139,23 +145,38 @@ class OtlpHelperTests(unittest.TestCase):
         else:
             self.fail("Expected OtelConnectionError")
 
-        exporter.shutdown.assert_called_once_with()
+        post.assert_called_once()
 
-    @patch("custom_components.otel.otlp.create_metric_exporter")
+    @patch("custom_components.otel.otlp.requests.post")
+    def test_validate_http_includes_auth_header(self, post: MagicMock) -> None:
+        """HTTP validation should send the configured authorization header."""
+        post.return_value = SimpleNamespace(ok=True, status_code=200)
+
+        validate_metric_exporter_connection(
+            "https://collector.example.com/v1/metrics",
+            PROTOCOL_HTTP,
+            "Bearer secret",
+        )
+
+        post.assert_called_once()
+        assert post.call_args.kwargs["headers"]["authorization"] == "Bearer secret"
+        assert (
+            post.call_args.kwargs["headers"]["content-type"] == "application/x-protobuf"
+        )
+
+    @patch("custom_components.otel.otlp.MetricsServiceStub")
+    @patch("custom_components.otel.otlp._create_grpc_channel")
     def test_validate_grpc_authentication_error(
         self,
-        create_metric_exporter: MagicMock,
+        create_grpc_channel: MagicMock,
+        metrics_service_stub: MagicMock,
     ) -> None:
         """GRPC validation should classify unauthenticated failures as auth errors."""
-        exporter = SimpleNamespace(
-            _client=SimpleNamespace(
-                Export=MagicMock(side_effect=_FakeRpcError(StatusCode.UNAUTHENTICATED))
-            ),
-            _translate_data=MagicMock(return_value=object()),
-            _headers=(("authorization", "Bearer secret"),),
-            shutdown=MagicMock(),
-        )
-        create_metric_exporter.return_value = exporter
+        channel = MagicMock()
+        stub = MagicMock()
+        stub.Export.side_effect = _FakeRpcError(StatusCode.UNAUTHENTICATED)
+        create_grpc_channel.return_value = channel
+        metrics_service_stub.return_value = stub
 
         try:
             validate_metric_exporter_connection(
@@ -168,4 +189,27 @@ class OtlpHelperTests(unittest.TestCase):
         else:
             self.fail("Expected OtelAuthenticationError")
 
-        exporter.shutdown.assert_called_once_with()
+        metrics_service_stub.assert_called_once_with(channel)
+        stub.Export.assert_called_once()
+        channel.close.assert_called_once_with()
+
+    @patch("custom_components.otel.otlp.secure_channel")
+    @patch("custom_components.otel.otlp.insecure_channel")
+    def test_create_grpc_channel_uses_insecure_transport_for_bare_target(
+        self,
+        insecure: MagicMock,
+        secure: MagicMock,
+    ) -> None:
+        """Bare host:port gRPC targets should use an insecure channel."""
+        _create_grpc_channel("collector.example.com:4317")
+        insecure.assert_called_once_with("collector.example.com:4317")
+        secure.assert_not_called()
+
+    def test_create_metric_exporter_supports_bare_grpc_target(self) -> None:
+        """Runtime exporter creation should support host:port gRPC targets."""
+        exporter = create_metric_exporter("localhost:4317", PROTOCOL_GRPC, None)
+        try:
+            assert isinstance(exporter, OTLPMetricExporterGrpc)
+            assert exporter._insecure is True
+        finally:
+            exporter.shutdown()

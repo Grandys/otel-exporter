@@ -67,7 +67,7 @@ def _build_connection_schema(defaults: Mapping[str, Any] | None = None) -> vol.S
             vol.Required(
                 CONF_ENDPOINT,
                 default=data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
-            ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
+            ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
             vol.Required(
                 CONF_PROTOCOL,
                 default=data.get(CONF_PROTOCOL, DEFAULT_PROTOCOL),

@@ -8,8 +8,18 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
-from grpc import RpcError, StatusCode
+from grpc import (
+    Channel,
+    RpcError,
+    StatusCode,
+    insecure_channel,
+    secure_channel,
+    ssl_channel_credentials,
+)
 from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
+from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2_grpc import (
+    MetricsServiceStub,
+)
 from opentelemetry.sdk.metrics.export import (
     MetricExporter,
     MetricExportResult,
@@ -29,6 +39,7 @@ if TYPE_CHECKING:
     )
 
 _LOGGER = logging.getLogger(__name__)
+_OTLP_HTTP_HEADERS = {"content-type": "application/x-protobuf"}
 
 
 class OtelConnectionError(Exception):
@@ -118,11 +129,12 @@ def create_metric_exporter(
             OTLPMetricExporter,
         )
 
+        grpc_endpoint, insecure = _resolve_grpc_endpoint(endpoint)
         headers = (("authorization", auth_header),) if auth_header else None
         return OTLPMetricExporter(
-            endpoint=endpoint,
+            endpoint=grpc_endpoint,
             headers=headers,
-            insecure=endpoint.startswith("http://"),
+            insecure=insecure,
             timeout=timeout,
         )
 
@@ -145,21 +157,11 @@ def validate_metric_exporter_connection(
     timeout_seconds: float = VALIDATION_TIMEOUT_SECONDS,
 ) -> None:
     """Validate that the configured OTLP endpoint accepts a metrics export."""
-    exporter = create_metric_exporter(
-        endpoint=endpoint,
-        protocol=protocol,
-        auth_header=auth_header,
-        timeout_seconds=timeout_seconds,
-    )
-
-    try:
-        metrics_data = MetricsData(resource_metrics=[])
-        if protocol == PROTOCOL_GRPC:
-            _validate_grpc_exporter(exporter, metrics_data, timeout_seconds)
-        else:
-            _validate_http_exporter(exporter, metrics_data, timeout_seconds)
-    finally:
-        exporter.shutdown()
+    metrics_data = MetricsData(resource_metrics=[])
+    if protocol == PROTOCOL_GRPC:
+        _validate_grpc_connection(endpoint, auth_header, metrics_data, timeout_seconds)
+    else:
+        _validate_http_connection(endpoint, auth_header, metrics_data, timeout_seconds)
 
 
 def redact_endpoint(endpoint: str) -> str:
@@ -184,21 +186,42 @@ def redact_endpoint(endpoint: str) -> str:
     )
 
 
-def _validate_grpc_exporter(
-    exporter: OTLPMetricExporterGrpc | OTLPMetricExporterHttp,
+def _resolve_grpc_endpoint(endpoint: str) -> tuple[str, bool]:
+    """Normalize a gRPC endpoint for the Python OTLP exporter and direct validation."""
+    if "://" not in endpoint:
+        return endpoint, True
+
+    parsed = urlsplit(endpoint)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        msg = f"Invalid OTLP gRPC endpoint: {endpoint}"
+        raise OtelConnectionError(msg)
+
+    return parsed.netloc, parsed.scheme == "http"
+
+
+def _create_grpc_channel(endpoint: str) -> Channel:
+    """Create a gRPC channel for a validation request."""
+    target, insecure = _resolve_grpc_endpoint(endpoint)
+    if insecure:
+        return insecure_channel(target)
+    return secure_channel(target, ssl_channel_credentials())
+
+
+def _validate_grpc_connection(
+    endpoint: str,
+    auth_header: str | None,
     metrics_data: MetricsData,
     timeout_seconds: float,
 ) -> None:
-    """Validate a gRPC exporter by sending an empty export request."""
-    grpc_exporter = exporter
-    try:
-        if grpc_exporter._client is None:  # noqa: SLF001
-            msg = "The gRPC OTLP exporter client could not be initialized"
-            raise OtelConnectionError(msg)
+    """Validate a gRPC endpoint without relying on exporter internals."""
+    channel = _create_grpc_channel(endpoint)
+    metadata = (("authorization", auth_header),) if auth_header else None
 
-        grpc_exporter._client.Export(  # noqa: SLF001
-            request=grpc_exporter._translate_data(metrics_data),  # noqa: SLF001
-            metadata=grpc_exporter._headers,  # noqa: SLF001
+    try:
+        stub = MetricsServiceStub(channel)
+        stub.Export(
+            request=encode_metrics(metrics_data),
+            metadata=metadata,
             timeout=timeout_seconds,
         )
     except RpcError as err:
@@ -211,18 +234,31 @@ def _validate_grpc_exporter(
 
         msg = f"Unable to export metrics to the OTLP gRPC endpoint: {err.code()}"
         raise OtelConnectionError(msg) from err
+    except Exception as err:
+        msg = "Unable to reach the OTLP gRPC endpoint"
+        raise OtelConnectionError(msg) from err
+    finally:
+        channel.close()
 
 
-def _validate_http_exporter(
-    exporter: OTLPMetricExporterGrpc | OTLPMetricExporterHttp,
+def _validate_http_connection(
+    endpoint: str,
+    auth_header: str | None,
     metrics_data: MetricsData,
     timeout_seconds: float,
 ) -> None:
-    """Validate an HTTP exporter by posting an empty export payload."""
-    serialized_data = encode_metrics(metrics_data).SerializeToString()
+    """Validate an HTTP endpoint without relying on exporter internals."""
+    headers = dict(_OTLP_HTTP_HEADERS)
+    if auth_header:
+        headers["authorization"] = auth_header
 
     try:
-        response = exporter._export(serialized_data, timeout_seconds)  # noqa: SLF001
+        response = requests.post(
+            endpoint,
+            data=encode_metrics(metrics_data).SerializeToString(),
+            headers=headers,
+            timeout=timeout_seconds,
+        )
     except requests.exceptions.RequestException as err:
         msg = "Unable to reach the OTLP HTTP endpoint"
         raise OtelConnectionError(msg) from err
