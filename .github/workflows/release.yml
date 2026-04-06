@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "custom_components/otel/manifest.json"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: "Create release from manifest version"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --force --tags origin
+
+      - name: Determine release version
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          current_version="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("custom_components/otel/manifest.json").read_text())
+          print(manifest["version"])
+          PY
+          )"
+
+          case "${current_version}" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "Invalid manifest version: ${current_version}"
+              exit 1
+              ;;
+          esac
+
+          previous_version=""
+          if [[ -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            previous_version="$(git show "${BEFORE_SHA}:custom_components/otel/manifest.json" 2>/dev/null | python3 -c 'import json, sys; data = sys.stdin.read().strip(); print(json.loads(data)["version"] if data else "")' || true
+            )"
+          fi
+
+          tag="v${current_version}"
+          version_changed="true"
+          if [[ -n "${previous_version}" && "${previous_version}" == "${current_version}" ]]; then
+            version_changed="false"
+          fi
+
+          tag_exists="false"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_exists="true"
+          fi
+
+          echo "current_version=${current_version}" >> "${GITHUB_OUTPUT}"
+          echo "previous_version=${previous_version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version_changed=${version_changed}" >> "${GITHUB_OUTPUT}"
+          echo "tag_exists=${tag_exists}" >> "${GITHUB_OUTPUT}"
+
+      - name: Skip when manifest version did not change
+        if: steps.version.outputs.version_changed != 'true'
+        run: |
+          echo "Manifest version did not change."
+          echo "Current version: ${CURRENT_VERSION}"
+          echo "Previous version: ${PREVIOUS_VERSION}"
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.current_version }}
+          PREVIOUS_VERSION: ${{ steps.version.outputs.previous_version }}
+
+      - name: Create tag
+        if: steps.version.outputs.version_changed == 'true' && steps.version.outputs.tag_exists != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}" "${GITHUB_SHA}"
+          git push origin "${TAG}"
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+
+      - name: Check if release already exists
+        if: steps.version.outputs.version_changed == 'true'
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          release_exists="false"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            release_exists="true"
+          fi
+
+          echo "release_exists=${release_exists}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create GitHub release
+        if: steps.version.outputs.version_changed == 'true' && steps.release.outputs.release_exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --generate-notes

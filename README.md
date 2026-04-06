@@ -2,6 +2,10 @@
 
 Custom Home Assistant integration that exports Home Assistant entity state changes as OpenTelemetry metrics to an OTLP endpoint.
 
+It is meant for setups where Home Assistant data should be available outside the built-in Home Assistant UI. Instead of keeping telemetry only in Home Assistant dashboards, history views, and recorder-backed charts, this integration sends entity measurements to a standard OpenTelemetry pipeline so they can be stored, queried, correlated, and visualized in tools such as Grafana, New Relic, and other OTLP-compatible backends.
+
+In practice, it solves a simple problem: Home Assistant is good at automation and local status views, but it is not a general observability platform. This integration lets you treat Home Assistant signals like regular telemetry data.
+
 ## Features
 
 - Config flow based setup
@@ -27,6 +31,10 @@ Custom Home Assistant integration that exports Home Assistant entity state chang
 2. Restart Home Assistant.
 
 ## Configuration
+
+Open the config flow directly in your Home Assistant instance:
+
+[![Open your Home Assistant instance and start setting up OpenTelemetry Exporter.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=otel)
 
 1. In Home Assistant, go to `Settings -> Devices & services -> Add integration`.
 2. Search for `OpenTelemetry Exporter`.
