@@ -1,6 +1,6 @@
 [project]
 name = "home-assistant-otel-exporter"
-version = "0.3.0"
+version = "0.4.0"
 description = "Custom Home Assistant integration that exports entity state changes as OpenTelemetry metrics."
 readme = "README.md"
 requires-python = ">=3.14"

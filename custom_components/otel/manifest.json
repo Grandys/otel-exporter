@@ -17,5 +17,5 @@
     "opentelemetry-exporter-otlp-proto-http==1.41.0"
   ],
   "single_config_entry": true,
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
